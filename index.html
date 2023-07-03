@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Spotify Data Visualization</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script type="text/javascript" src="script.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+     <!-- For the world map -->
+    <script src="https://unpkg.com/topojson@3.0.2/dist/topojson.min.js"></script>
+    <script type="module">
+
+      import {transition} from "https://cdn.skypack.dev/d3-transition@3";
+
+      const t = transition();
+      // <link rel="stylesheet" type="text/css" href="styles.css"></link>
+
+    </script>
+
+    <!-- For Map Libre -->
+    <script src='https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js'></script>
+    <link href='https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css' rel='stylesheet' />
+    <link rel="stylesheet" href="style.css">
+
+  </head>
+
+  <body>
+    <div id = "header">
+      <h1 id = "Title"><strong>Global Beats: <br>
+        Unveiling the Most Popular Genres through Playlists</strong></h1>
+    </div>
+    
+    <div id="choroplethMap"></div>
+    <div style="display: flex">
+    </div>
+    <div id="tooltip"></div>
+    <div id="tooltip2"></div>
+    <div id="world">
+    </div>
+
+    
+    <div id='map' style='width: 1200px; height: 600px;'></div>
+  <script>
+
+  var map = new maplibregl.Map({
+    container: 'map',
+    style: 'https://demotiles.maplibre.org/style.json', // stylesheet location
+    center: [-117.5, 37], // starting position [lng, lat]
+    zoom: 4 // starting zoom
+  });
+
+
+  // Get the top 3 most popular genres by country
+  var topGenresByCountry = new Map();
+
+  // Store the genre count for each artist
+  var artistGenreCount = {};
+
+  // Store the distribution of genres for each artist
+  var selectedArtistDist
+
+  // Placeholder for geoJson data
+  // convert to geoJson
+  var geoJsonData = {
+    type: "FeatureCollection",
+    features: []
+  };
+
+  d3.json("map_data/worldmap.geojson").then(function(worldmapData) {
+  var worldmap = worldmapData;
+
+  // Load the latest_data.csv file
+  d3.csv('data/latest_data.csv').then(function(csvData) {
+
+  
+
+
+  csvData.forEach(function(d) {
+    var countryName = d.Country;
+    var genre = d.Genre;
+    var artist = d.Artist;
+    // console.log('Name and genre', [countryName, genre]);
+    if (countryName == 'USA') {
+      countryName = 'United States of America';
+    }
+    if (countryName == 'England') {
+      countryName = 'United Kingdom';
+    }
+    // console.log('Worldmap features', worldmap.features);
+    // console.log('Worldmap feature names', worldmap.features.properties);
+
+    // Find the matching country feature in the worldmap.geojson file
+    var countryFeature = worldmap.features.find(function(feature) {
+      // console.log('Individual feature', feature.properties.NAME);
+      // console.log(feature.properties.NAME === countryName)
+      return feature.properties.NAME === countryName;
+    });
+
+    if (countryFeature) {
+      // Create a new GeoJSON feature using the matched country feature
+      // console.log('Country Feature', countryFeature);
+      var newFeature = {
+        type: "Feature",
+        properties: {
+          name: countryName,
+          genre: genre,
+          artist: artist
+        },
+        geometry: countryFeature.geometry
+      };
+      // console.log('Newly created feature', newFeature);
+      geoJsonData.features.push(newFeature);
+    
+      // Add the new feature to the GeoJSON object
+      // geojsonData.features.push(newFeature);
+    }
+  });
+
+  // Group the features by country
+  // console.log('GeoJson Features', geoJsonData.features);
+  var featByCountry = d3.group(geoJsonData.features, d => d.properties.name);
+  console.log('Grouped Features by Country', featByCountry);
+
+  // Grouped by country and genre
+  var featByCountryGenre = d3.group(geoJsonData.features, d => d.properties.name, d => d.properties.genre);
+  // console.log('Grouped by country then genre', featByCountryGenre);
+  // List of countries
+  country_list = Array.from(featByCountryGenre.keys());
+
+
+  featByCountry.forEach(function(features, country) {
+    // Count the occurrence of each genre in the country
+    var genreCounts = d3.rollup(
+      features,
+      v => v.length,
+      d => d.properties.genre
+    );
+  
+    // Sort the genres in descending order
+    var sortedGenres = [...genreCounts.entries()].sort((a, b) => b[1] - a[1]);
+
+    // Get the top 3 genres
+    var topThree = sortedGenres.slice(0, 3).map(d => d[0]);
+  
+    // Store the top 3 genres for the country
+    topGenresByCountry.set(country, topThree);
+  });
+
+  console.log('Top genres by Country: ', topGenresByCountry);
+
+  // var GenreByArtist = d3.group(featByCountryGenre, d => d.properties.name, d => d.properties.genre);
+
+  function getMostCommonGenre(artistList) {
+    //get the Genres
+    var pop_genre_per_country = {};
+    // go through each country
+    artistList.forEach((artist) => {
+      var artistGenresByCountry = [];
+      // console.log('Current artist: ', artist);
+      // pop_genre_per_country[artist] = [];
+      country_list.forEach(function(country) {
+      var country_map = featByCountryGenre.get(country);
+      // console.log('Current Country: ', country);
+      genre_list = Array.from(country_map.keys()); // Available genres for the country
+      // Go through the map and count each occurance of the artist in each genre
+      genre_dict = {};
+      genre_list.forEach((genre) => {
+        // genre_dict[genre] = 0;
+        var songs = country_map.get(genre)
+        // console.log('Song list for ' + genre + ': ', songs);
+        var genre_count = 0;
+        songs.forEach((song) => {
+          var recordingArtist = song.properties.artist;
+          if (recordingArtist == artist) {
+            genre_count++;
+          }
+        })
+        // console.log('Number of times '+artist+ ' appeared in '+genre+ ' :', genre_count);
+        genre_dict[genre] = genre_count;
+      })
+      // console.log('Genre range for '+artist+':', genre_dict);
+      var most_pop_genre = Object.keys(genre_dict).reduce((a, b) => genre_dict[a] > genre_dict[b] ? a : b);
+      if (genre_dict[most_pop_genre] === 0) {
+        most_pop_genre = 'N/A';
+      }
+      // console.log('And the most popular genre for '+artist+':', most_pop_genre);
+      var curr = artist;
+      var current_country_most_pop = {[country]: most_pop_genre};
+      artistGenresByCountry.push(current_country_most_pop);
+      
+      // pop_genre_per_country[artist].push(current_country_most_pop);
+      // console.log(current_country_most_pop);
+      // console.log('The spread for '+artist+' :', pop_genre_per_country);
+      // console.log(pop_genre_per_country)
+    });
+    pop_genre_per_country[artist] = artistGenresByCountry;
+    })
+    return pop_genre_per_country;
+  }
+
+  
+
+  // Determine the most common genre for each artist from the set I chose
+  //[USA -> Linkin Park, UK -> Artic Monkeys, Japan -> Joe Hisaishi, France -> Birdy Nam Nam, Germany -> Ludwig Van Beethoven, China -> Daft Punk, Ecuador -> Daddy Yankee]
+  var selectedArtists = ['Linkin Park', 'Arctic Monkeys', 'Joe Hisaishi', 'Ratatat', 'Ludwig van Beethoven', 'Daft Punk', 'Daddy Yankee'];
+
+  selectedArtistDist = getMostCommonGenre(selectedArtists);
+  console.log('Selected artist distribution:');
+    // Iterate over each artist in my list
+    // var artistTest = 'Linkin Park'
+    // console.log('I am testing using: ', artistTest);
+
+
+  selectedArtists.forEach(function (artist) {
+    // console.log('Looking at: ', artist);
+    // go through each country and determine what thier most common genre classification is
+    // var genres = topGenresByCountry.get(country);
+    // find the genre he falls into in the given country
+    // targetCountryGenres = featByCountryGenre.get(country)
+    
+    // console.log(targetCountryGenres);
+    // var songs = featByCountryGenre.get(country).get(randomGenre);
+    // pick a random artist from that genre
+    
+    // var length = songs.length;
+    // var rand = Math.floor(Math.random() * length)
+    // var randomArtist = songs[rand].properties.artist;
+    // console.log('Random Artist: ', randomArtist);
+
+    // Keep track of the genre count for each artist
+    // if (artistGenreCount[randomArtist]) {
+      // artistGenreCount[randomArtist][artistGenre] = (artistGenreCount[randomArtist.artist][artistGenre] || 0) + 1;
+    // } else {
+    //   artistGenreCount[randomArtist.artist] = { [artistGenre]: 1 };
+    // }
+  }) 
+
+  
+  var artistMostCommonGenre = {};
+  for (var artist in selectedArtists) {
+    var genreCount = artistGenreCount[artist];
+    var maxCount = 0;
+    var mostCommonGenre = '';
+
+    for (var genre in genreCount) {
+      if (genreCount[genre] > maxCount) {
+        maxCount = genreCount[genre];
+        mostCommonGenre = genre;
+      }
+    }
+
+    artistMostCommonGenre[artist] = mostCommonGenre;
+  }
+  // console.log('Most popular genere for the artist', artistMostCommonGenre);
+
+
+  map.on('load', function () {
+    // Add a new source from geoJson playlist data
+    map.addSource('playlists', {
+      type: 'geojson',
+      data: geoJsonData
+    });
+
+    // Add a layer to visualize the data
+    map.addLayer({
+      id: 'playlist-circles',
+      type: 'circle',
+      source: 'playlists',
+      paint: {
+        'circle-color': '#ff0000',
+      'circle-radius': 2,
+      'circle-opacity': 0.8
+      }
+    });
+
+
+})
+  })
+
+
+})
+  const tooltip = d3.select("#tooltip");
+  
+  </script>
+
+<!-- Section 2 of the project, displaying the top Genre for each relevant country based on the artist selected from a dropdown -->
+<div class="map-overlay top">
+  <div class="map-overlay-inner">
+    <fieldset>
+      <label>Select an artist</label>
+      <select id="artist-dropdown" name="artist">
+        <option value="">Select an artist</option>
+      </select>
+    </fieldset>
+  </div>
+</div>
+
+  <script>
+  // Array of selected artists
+  var selectedArtists = ['Linkin Park', 'Arctic Monkeys', 'Joe Hisaishi', 'Birdy Nam Nam', 'Ludwig van Beethoven', 'Daft Punk', 'Daddy Yankee'];
+
+  // Get the dropdown element
+  var artistDropdown = document.getElementById('artist-dropdown');
+
+  // Put the artist options inside the dropdown
+  selectedArtists.forEach(function(artist) {
+    var option = document.createElement('option');
+    option.value = artist;
+    option.text = artist;
+    artistDropdown.appendChild(option);
+  });
+
+
+  // Initalize a boolean that changes if the dropdown is changed
+  var dropDownActivated = false; // Set the initial value to false
+
+  var selectedArtist;
+  // Create a new data grouping that we can refer to
+  var topGenresCopy = new Map();
+
+  // Event listener for dropdown change
+  artistDropdown.addEventListener('change', function() {
+    var featByCountry = d3.group(geoJsonData.features, d => d.properties.name);
+    featByCountry.forEach(function(features, country) {
+      // Count the occurrence of each genre in the country
+      var genreCounts = d3.rollup(
+        features,
+        v => v.length,
+        d => d.properties.genre
+      );
+    
+      // Sort the genres in descending order
+      var sortedGenres = [...genreCounts.entries()].sort((a, b) => b[1] - a[1]);
+
+      // Get the top 3 genres
+      var topThree = sortedGenres.slice(0, 3).map(d => d[0]);
+    
+      // Store the top 3 genres for the country
+      topGenresCopy.set(country, topThree);
+    });
+
+    selectedArtist = this.value;
+    if (!selectedArtist) {
+    dropDownActivated = false; // Set to false if default value is selected
+    } else {
+    console.log('Value changed!', selectedArtist);
+    console.log('Original list:', topGenresByCountry);
+    
+    // Get the genre distribution associated with that artist
+    genreDist = selectedArtistDist[selectedArtist];
+    
+    // Intialize tooltips for each country
+    country_list.forEach(function(country) {
+      // console.log('We are in: ', country);
+      // console.log('This is what is here already:', topGenresByCountry.get(country));
+
+      var tooltipContent = '';
+      
+      // Find the genre for the selected country by looking for that country
+      genreDist.forEach(function(item) {
+        // Extract the country and genre
+        var extractedCountry = Object.keys(item)[0];
+        var genre = Object.values(item)[0] || 'N/A';
+        if (extractedCountry == country) {
+          topGenresCopy.set(country, genre);
+        }
+      });
+      
+    });
+    console.log('Our finished product:', topGenresCopy);
+    dropDownActivated = true;
+    }
+
+
+});
+
+  // Set up an event listener on the map.
+  map.on('click', function(e) {
+
+  // get the logitude/latitude
+  var location = e.lngLat;
+
+  // get the country assosicated with that long/lat
+  var location_features = map.queryRenderedFeatures(e.point);
+
+  if (!location_features){ // If the clicked area isn't a country
+    console.log('Not a country!!')
+    tooltip.style('visibility', 'hidden');
+  } else { // If it is a country
+    // console.log('location Features', location_features);
+    // Create the tooltip
+    var tooltip = document.getElementById('tooltip');
+
+    var country_name = location_features[0].properties.NAME
+    // console.log('A click event has occurred in ' + country_name);
+    if (!dropDownActivated) {
+      // Retrieve the top 3 genres for the clicked country
+    var topGenres = topGenresByCountry.get(country_name);
+
+    // Create new content
+    var tooltipContent = 'Top Genres:<br>';
+    // console.log('Top Genres:', topGenres);
+    if (!topGenres) { // If this country isn't in the dataset
+      console.log('Not enough info in this region')
+      tooltipContent = '';
+    } else {
+
+      topGenres.forEach(function(genre) {
+      tooltipContent += genre + '<br>';
+      });
+
+    // Set the tooltip content
+    tooltip.innerHTML = (dropDownActivated ? 'Top Genre for '+ selectedArtist +':<br>' : tooltipContent) + tooltipContent;
+    // console.log('Top Genres here:', topGenres)
+
+      }
+    } else { // If the drop down has been selected
+      // Create new content
+      var country_genre = topGenresCopy.get(country_name);
+      var tooltipContent = 'Top Genre for '+ selectedArtist +':<br>' + country_genre;
+      // console.log('Testing for the genre again');
+      if (!country_genre) {
+        tooltipContent = '';
+      }
+    }
+
+    // Set the tooltip content
+    tooltip.innerHTML = tooltipContent;
+
+    // Calculate the tooltip position based on coords
+    var tooltipX = e.point.x + 'px';
+    var tooltipY = e.point.y + 'px';
+    
+  }
+  });
+
+  map.on("mousemove", function(e) {
+      // get mouse positon
+      // const [mouseX, mouseY] = map.unproject(e.point);
+      const mouseX = e.point.x;
+      const mouseY = e.point.y;
+
+      // Check if hovered long/lat has genre information
+      var location = e.lngLat;
+
+      // get the country assosicated with that long/lat
+      var location_features = map.queryRenderedFeatures(e.point)[0];
+      
+      // console.log('Hovered feature: ', location_features);
+      if (!location_features) { // If the hovered area is not a country
+        console.log('Not a country!');
+        tooltip.style('visibility', 'hidden');
+      } else {
+      var country_name = location_features.properties.NAME
+      // console.log('Country name', country_name);
+
+      // Set tooltip position
+      tooltip.style('visibility', 'visible');
+      tooltip.style('left', mouseX + 'px')
+      .style('top', mouseY + 'px')
+
+      }
+    })
+
+  </script>
+
+  
+  <script>
+  // Section 3, displaying a stacked bar chart showing the select artists and how many countries they appear in
+
+
+  // Array of selected artists
+  var selectedArtists = ['Linkin Park', 'Arctic Monkeys', 'Joe Hisaishi', 'Birdy Nam Nam', 'Ludwig van Beethoven', 'Daft Punk', 'Daddy Yankee'];
+
+  // Tool tip for display
+  const tooltip2 = d3.select("#tooltip2");
+
+  // Repopulate the geoJson data with features so we can work with it here
+  d3.json("map_data/worldmap.geojson").then(function(worldmapData) {
+  var worldmap = worldmapData;
+    // Load the latest_data.csv file
+    d3.csv('data/latest_data.csv').then(function(csvData) {
+
+    
+      csvData.forEach(function(d) {
+        var countryName = d.Country;
+        var genre = d.Genre;
+        var artist = d.Artist;
+        // console.log('Name and genre', [countryName, genre]);
+        if (countryName == 'USA') {
+          countryName = 'United States of America';
+        }
+        if (countryName == 'England') {
+          countryName = 'United Kingdom';
+        }
+
+        // Find the matching country feature in the worldmap.geojson file
+        var countryFeature = worldmap.features.find(function(feature) {
+          return feature.properties.NAME === countryName;
+        });
+
+        if (countryFeature) {
+          // Create a new GeoJSON feature using the matched country feature
+          var newFeature = {
+            type: "Feature",
+            properties: {
+              name: countryName,
+              genre: genre,
+              artist: artist
+            },
+            geometry: countryFeature.geometry
+          };
+          // console.log('Newly created feature', newFeature);
+          geoJsonData.features.push(newFeature);
+        
+          // Add the new feature to the GeoJSON object
+          // geojsonData.features.push(newFeature);
+        }
+      });
+
+    var featByCountryGenre = d3.group(geoJsonData.features, d => d.properties.name, d => d.properties.genre);
+    console.log('Grouped by country then genre, again', featByCountryGenre);
+    // List of countries
+    country_list = Array.from(featByCountryGenre.keys());
+
+    // Populate the map
+
+    function getMostCommonGenre(artistList) {
+      //get the Genres
+      var pop_genre_per_country = {};
+      // go through each country
+      artistList.forEach((artist) => {
+        var artistGenresByCountry = [];
+        // console.log('Current artist: ', artist);
+        country_list.forEach(function(country) {
+        var country_map = featByCountryGenre.get(country);
+        // console.log('Current Country: ', country);
+        genre_list = Array.from(country_map.keys()); // Available genres for the country
+        // Go through the map and count each occurance of the artist in each genre
+        genre_dict = {};
+        genre_list.forEach((genre) => {
+          // genre_dict[genre] = 0;
+          var songs = country_map.get(genre)
+          // console.log('Song list for ' + genre + ': ', songs);
+          var genre_count = 0;
+          songs.forEach((song) => {
+            var recordingArtist = song.properties.artist;
+            if (recordingArtist == artist) {
+              genre_count++;
+            }
+          })
+          genre_dict[genre] = genre_count;
+        })
+        var most_pop_genre = Object.keys(genre_dict).reduce((a, b) => genre_dict[a] > genre_dict[b] ? a : b);
+        if (genre_dict[most_pop_genre] === 0) {
+          most_pop_genre = 'N/A';
+        }
+        var curr = artist;
+        var current_country_most_pop = {[country]: most_pop_genre};
+        artistGenresByCountry.push(current_country_most_pop);
+      });
+        pop_genre_per_country[artist] = artistGenresByCountry;
+      })
+      return pop_genre_per_country;
+    }
+
+    // The distribution of artists and thier top genres for each country
+    selectedArtistDist = getMostCommonGenre(selectedArtists);
+    console.log('Another distibution', selectedArtistDist);
+
+    // Prepare the data for the stacked bar chart
+    const StackedData = selectedArtists.map((artist) => {
+      const countryGenres = selectedArtistDist[artist];
+      const totalCountries = countryGenres.length;
+      const genreCounts = {};
+      // console.log('Looking at: ', artist);
+
+      // Calculate the occurences of genres
+      countryGenres.forEach((countryGenre) => {
+        const country = Object.keys(countryGenre)[0];
+        const genre = countryGenre[country];
+        if (genre !== 'N/A') {
+          genreCounts[genre] = (genreCounts[genre] || 0) + 1;
+        }
+      });
+
+      // Flatten the genre arrays in topGenresByCountry
+      const allGenres = [];
+      topGenresByCountry.forEach((genres) => {
+        allGenres.push(...genres);
+      });
+      const uniqueGenres = [...new Set(allGenres)]
+
+      // Add missing genre classifications with a count of 0
+      const missingGenres = uniqueGenres.filter((genre) => !Object.keys(genreCounts).includes(genre));
+      // console.log('This is missing:', missingGenres);
+
+      missingGenres.forEach((genre) => {
+        genreCounts[genre] = 0;
+      });
+
+      // Calculate the proportions of each genre
+      const totalCount = Object.values(genreCounts).reduce((sum, count) => sum + count, 0);
+      const genreProportions = {};
+      Object.entries(genreCounts).forEach(([genre, count]) => {
+        genreProportions[genre] = count / totalCount;
+      });
+      
+
+      // Create the data object
+      const dataObj = {
+        artist,
+        ...genreProportions,
+      };
+
+      // Assign genre proportions to each genre property
+      // Object.entries(genreProportions).forEach(([genre, proportion]) => {
+      //   dataObj[genre] = proportion;
+      // });
+
+      return dataObj;
+    });
+
+
+    // Ensure same amount of genres for each entry 
+    const genreSet = new Set(); // Create a set to collect all unique genres
+
+    // Collect all unique genres from StackedData
+    StackedData.forEach((data) => {
+      const genres = Object.keys(data).filter((key) => key !== "artist");
+      genres.forEach((genre) => genreSet.add(genre));
+    });
+
+    const allGenres = Array.from(genreSet); // Convert the set to an array
+    // console.log('Unique genres', allGenres);
+
+    // Now add the missing ones to the StackedData 
+    StackedData.forEach((data) => {
+      allGenres.forEach((genre) => {
+        if (!(genre in data)) {
+          data[genre] = 0; // Add missing genre with count 0
+        }
+      });
+    });
+
+    // setting the color for each secondary Key value (Different genres)
+    const colors = [
+      "royalblue", // Rock/Alternative
+      "Red", // Rock
+      "#19c138", // Soundtrack
+      "purple", // Jazz/Japanese
+      "grey",
+      "aliceblue",
+    ];
+
+    const colorScale = d3.scaleOrdinal().domain([0, 1, 2, 3, 4, 5, 6]).range(colors);
+    const margin = { top: 100, bottom: 50, left: 40, right: 40 };
+    const width = 1200 - margin.left - margin.right;
+    const height = 700 - margin.top - margin.bottom;
+
+    //svg canvas
+    const container = d3.select("#stacked");
+    const svg = container
+        .append("svg")
+        .attr("width", width + margin.left + margin.right)
+        .attr("height", height + margin.top + margin.bottom)
+        .append("g")
+        .attr("transform", `translate(${margin.left}, ${margin.top})`);
+
+    
+
+    // Start using the Stacked Data to make the bar chart
+    const genres = Object.keys(StackedData[0]).filter((key) => key !== "artist");
+
+    const custStack = d3.stack().keys(Object.keys(StackedData[0]).filter((key) => key !== 'artist'));
+    const result = custStack(StackedData);
+    console.log('Resulting stack', result);
+
+    let groups = svg
+    .selectAll(".gbars")
+    .data(result).enter().append("g")
+    .attr("class", "gbars")
+    .attr("fill", (d, i) => {
+      // console.log([d[0].data, i, colorScale(i)])
+      return colorScale(i)
+    });
+
+    //Scale for x- and y-axis
+    const xScale = d3.scaleBand()
+      .domain(StackedData.map((d) => d.artist)) // data.map create an array of days
+      .range([0, width])
+      .padding(0.1);
+
+    // Calculate the maximum y value for the y scale
+    let maxValue = d3.max(result, (d) => d3.max(d, (d) => d[1]));
+    const yScale = d3.scaleLinear().domain([0, maxValue]).range([height, 0]);
+
+    groups
+    .selectAll("rect")
+    .data((d) => d).enter().append("rect")
+    .attr("x", (d) => xScale(d.data.artist))
+    .attr("y", (d) => yScale(d[1]))
+    .attr("height", (d) => {
+      const height = yScale(d[0]) - yScale(d[1]);
+      // console.log([yScale(d[0]), yScale(d[1])]);
+      // console.log(d);
+      return height;
+    })
+    .attr("width", xScale.bandwidth());
+
+    // Axes
+    const xAxis = d3.axisBottom().scale(xScale);
+    const yAxis = d3.axisLeft().scale(yScale);
+    svg.append("g").attr("transform", `translate(0, ${height})`).call(xAxis)
+    .style('color', 'aliceblue') // Change the color of the axis
+    .selectAll('text')
+    .style('font-family', 'Spotify Font');
+
+    svg.append("g").call(yAxis).style('color', 'aliceblue')
+    .selectAll('text')
+    .style('font-family', 'Spotify Font');
+
+    // Add a title
+    svg
+    .append("text")
+    .attr("class", "title")
+    .attr("x", width / 3)
+    .attr("y", -margin.top / 2)
+    .text("Genre Distribution of our selected Artists")
+    .attr('fill', '#19c138')
+    .style('font-family', 'Spotify Font');
+
+    // Add a legend
+
+    // Define the genre colors
+    const genreColors = {
+      "Rock/Alternative": "#19c138",
+      "ROCK": "Red",
+      "ELECTRONIC": "purple",
+      "CLASSICAL": "white",
+      "GERMAN/CLASSICAL": "aliceblue",
+      "CHINESE/SOUNDTRACK": "orange",
+      "HIP-HOP": 'darkcyan',
+      "BRITISH/INDIE": "Purple",
+      "ELECTRONIC/FRENCH": "blueviolet",
+      "INDIE/ALTERNATIVE": "#19c138",
+      "BRITISH/ROCK": "greenyellow",
+      "Soundtrack": "royalblue"
+      // Add more genre-color mappings here
+    };
+
+    // Add a tooltip for the genre
+    // Create the tooltip
+    const tooltip2 = d3.select("#tooltip2");
+
+    // groups.selectAll("rect")
+    // .data((d) => d)
+    // .enter()
+    // .append("div")
+    // .attr("class", "tooltip")
+    // .style("opacity", 0);
+
+    // Add mouseover and mouseout event handlers to each section
+    groups.selectAll("rect")
+      .on("mouseover", (event, d) => {
+        // console.log('This is the data: ', d.data);
+        const genres = Object.keys(d.data).filter((key) => key !== "artist" && d.data[key] > 0);
+        // console.log('Test to get the genre:', genres);
+        const genre = genres
+
+        // Show separate tooltips for each genre in the specific section
+        if (genres.length > 1) {
+
+          genres.forEach((genre, index) => {
+          // console.log(index);
+          const tooltip = d3.select(event.target)
+            .append("div")
+            .attr("class", "tooltip")
+            .html(genre)
+            .style("left", "50%")
+            .style("top", `${-1.5 - index * 1.5}rem`)
+            .style("transform", "translateX(-50%)");
+      })
+        } else {
+          const genre = genres[0];
+          tooltip.innerHTML = genre;
+        }
+        // Show the tooltip for the specific section
+        tooltip2
+        .style("opacity", 0.9)
+        .style("left", `${event.pageX}px`)
+        .style("top", `${event.pageY - 20}px`)
+        .html(genres.join(", ")); 
+
+        // console.log(event.target);
+        d3.select(event.target)
+          .style("opacity", 0.9)
+          .style("position", "relative")
+          .append("div")
+          .attr("class", "tooltip")
+          .html(genre)
+          .style("left", "50%")
+          .style("top", "-1.5rem")
+          .style("transform", "translateX(-50%)");
+        
+    })
+
+    .on("mouseout", () => {
+    // Hide the tooltip on mouseout
+    tooltip2.style("opacity", 0);
+    });
+
+    // Create the legend
+  //   const legend = svg.append("g")
+  //     .attr("class", "legend")
+  //     .attr("transform", `translate(${width - 100}, 20)`); // Adjust the position of the legend
+
+  //   const uniqueGenres = Object.keys(colors);
+
+  //   let legendItems = legend.selectAll(".legend-item")
+  //   .data(Object.entries(genreColors))
+  //   .enter()
+  //   .append("g")
+  //   .attr("class", "legend-item")
+  //   .attr("transform", (d, i) => `translate(0, ${i * 20})`);
+
+        
+  //   legendItems.append("rect")
+  //     .attr("width", 12)
+  //     .attr("height", 12)
+  //     .attr("fill", (d) => d[1]);
+
+  //   legendItems.append("text")
+  //   .attr("x", 20) // Adjust the distance between the rectangle and text
+  //   .attr("y", 10) // Adjust the vertical alignment of the text
+  //   .text((d) => d[0]) // Use the genre as the text content
+  //   .style("font-family", "Your Custom Font") // Apply the custom font
+  //   .style("fill", "white"); // Set the text color
+
+    })
+  })
+
+  </script>
+
+  <div id = "section3_header">
+    <p id = "Section-3">Artists' Influence/Representation across the world</p>
+  </div>
+  <div id = "stacked">
+  </div>
+    </body>
+</html>
